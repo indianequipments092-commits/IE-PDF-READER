@@ -15,7 +15,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -36,12 +35,15 @@ class PdfViewerActivity : AppCompatActivity() {
     private var sourceUri: Uri? = null
     private var adapter: PdfPageAdapter? = null
     private val uiHandler = Handler(Looper.getMainLooper())
-    private var revealRunnable: Runnable? = null
+    private var statusBarHideRunnable: Runnable? = null
+    private var statusBarVisible = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_viewer)
 
+        // Keep the app content below the system status bar. The PDF toolbar is
+        // independent and must never disappear together with the status bar.
         WindowCompat.setDecorFitsSystemWindows(window, true)
         toolbar = findViewById(R.id.viewerToolbar)
         recyclerView = findViewById(R.id.pdfRecyclerView)
@@ -51,6 +53,7 @@ class PdfViewerActivity : AppCompatActivity() {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.setHasFixedSize(false)
         recyclerView.itemAnimator = null
+        recyclerView.setItemViewCacheSize(1)
 
         sourceUri = intent?.data
         pdfName = resolveDisplayName(sourceUri) ?: "PDF"
@@ -61,22 +64,21 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
 
-        // Once the reader is open, touching the PDF means the user is reading.
-        // Hide the transient system status bar immediately instead of restarting
-        // the reveal timer on every touch.
+        // PDF tap controls ONLY the Android status bar. The reader toolbar
+        // stays visible at all times, just like a normal PDF reader.
         recyclerView.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) hideControlsImmediately()
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) toggleStatusBar()
             false
         }
 
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
-                if (dy != 0) hideControlsSoon()
+                if (dy != 0 && statusBarVisible) scheduleStatusBarHide(2000L)
             }
         })
 
-        hideControls()
+        showStatusBarAndScheduleHide()
         openPdf(sourceUri)
     }
 
@@ -97,14 +99,13 @@ class PdfViewerActivity : AppCompatActivity() {
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
 
-                    // Render to the actual reader width, not the physical display
-                    // width. This keeps the page exactly inside the RecyclerView
-                    // after status/navigation insets are applied.
+                    // Render using the actual reader width so the page fits the
+                    // available PDF area, not the physical display width.
                     val width = recyclerView.width.coerceAtLeast(1)
                     adapter = PdfPageAdapter(pdfRenderer, width)
                     recyclerView.adapter = adapter
                     pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
-                    revealControlsTemporarily()
+                    showStatusBarAndScheduleHide()
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -122,29 +123,34 @@ class PdfViewerActivity : AppCompatActivity() {
         if (first != RecyclerView.NO_POSITION) pageIndicator.text = "${first + 1} / $total"
     }
 
-    private fun revealControlsTemporarily() {
-        toolbar.visibility = View.VISIBLE
-        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
-        revealRunnable?.let(uiHandler::removeCallbacks)
-        revealRunnable = Runnable { hideControls() }
-        uiHandler.postDelayed(revealRunnable!!, 3000L)
+    private fun toggleStatusBar() {
+        if (statusBarVisible) {
+            hideStatusBar()
+        } else {
+            showStatusBarAndScheduleHide()
+        }
     }
 
-    private fun hideControlsSoon() {
-        revealRunnable?.let(uiHandler::removeCallbacks)
-        revealRunnable = Runnable { hideControls() }
-        uiHandler.postDelayed(revealRunnable!!, 1200L)
+    private fun showStatusBarAndScheduleHide() {
+        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
+        statusBarVisible = true
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.statusBars())
+        scheduleStatusBarHide(2000L)
     }
 
-    private fun hideControlsImmediately() {
-        revealRunnable?.let(uiHandler::removeCallbacks)
-        revealRunnable = null
-        hideControls()
+    private fun scheduleStatusBarHide(delayMs: Long) {
+        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
+        statusBarHideRunnable = Runnable { hideStatusBar() }
+        uiHandler.postDelayed(statusBarHideRunnable!!, delayMs)
     }
 
-    private fun hideControls() {
-        toolbar.visibility = View.GONE
-        WindowInsetsControllerCompat(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
+    private fun hideStatusBar() {
+        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
+        statusBarHideRunnable = null
+        statusBarVisible = false
+        WindowInsetsControllerCompat(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun sharePdf() {
@@ -219,7 +225,7 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        revealRunnable?.let(uiHandler::removeCallbacks)
+        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
         adapter?.shutdown()
         recyclerView.adapter = null
         renderer?.close()
