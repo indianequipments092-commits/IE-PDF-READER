@@ -91,10 +91,12 @@ class PdfPageView @JvmOverloads constructor(
         val targetHeight = max(1, (pageHeight * renderScale).toInt())
 
         bitmap?.recycle()
-        bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-        bitmap!!.eraseColor(Color.WHITE)
-        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        val newBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        newBitmap.eraseColor(Color.WHITE)
+        page.render(newBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         page.close()
+
+        bitmap = newBitmap
 
         resetToFit()
         invalidate()
@@ -140,8 +142,6 @@ class PdfPageView @JvmOverloads constructor(
                 if (!scaleDetector.isInProgress && dragging && event.pointerCount == 1) {
                     val dx = event.x - lastTouchX
                     val dy = event.y - lastTouchY
-                    // GestureDetector also receives the event; manual movement is used only
-                    // as the direct drag path to keep the PDF responsive on slow devices.
                     if (dx != 0f || dy != 0f) {
                         offsetX += dx
                         offsetY += dy
