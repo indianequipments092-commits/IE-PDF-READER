@@ -20,7 +20,6 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private var offsetY = 0f
     private var lastTouchX = 0f
     private var lastTouchY = 0f
-    private var dragging = false
 
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
         isDither = true
@@ -33,14 +32,13 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val image = bitmap ?: return false
             val oldScale = baseScale * zoom
-            val newZoom = (zoom * detector.scaleFactor).coerceIn(1f, 10f)
+            val newZoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
             val newScale = baseScale * newZoom
 
             // Keep the exact PDF point under the two-finger midpoint fixed.
-            // This makes pinch-to-zoom happen between the fingers instead of
-            // jumping toward a corner.
+            // The zoom therefore follows the user's fingers instead of jumping
+            // toward a corner of the page.
             val centerX = width / 2f
             val centerY = height / 2f
             val contentX = (detector.focusX - centerX - offsetX) / oldScale
@@ -111,6 +109,9 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private fun resetToFit() {
         val image = bitmap ?: return
         val availableWidth = width.toFloat().coerceAtLeast(1f)
+        // The source bitmap is intentionally rendered at a higher resolution;
+        // fitting it back to the screen keeps normal view sharp and leaves real
+        // pixel detail available for pinch zoom.
         baseScale = (availableWidth / image.width).coerceAtLeast(0.01f)
         zoom = 1f
         offsetX = 0f
@@ -142,18 +143,14 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             MotionEvent.ACTION_DOWN -> {
                 lastTouchX = event.x
                 lastTouchY = event.y
-                dragging = false
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // RecyclerView must not steal the second finger during a pinch.
                 parent.requestDisallowInterceptTouchEvent(true)
-                dragging = false
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (!scaleDetector.isInProgress && event.pointerCount == 1 && zoom > 1.001f) {
-                    dragging = true
                     parent.requestDisallowInterceptTouchEvent(true)
                     offsetX += event.x - lastTouchX
                     offsetY += event.y - lastTouchY
@@ -168,12 +165,10 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                // Continue naturally with the remaining finger after a pinch.
                 if (!scaleDetector.isInProgress) parent.requestDisallowInterceptTouchEvent(false)
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                dragging = false
                 parent.requestDisallowInterceptTouchEvent(false)
             }
         }
