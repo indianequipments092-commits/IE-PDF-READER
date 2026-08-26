@@ -4,8 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.util.AttributeSet
@@ -20,12 +18,7 @@ class PdfPageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-        isDither = true
-    }
     private var bitmap: Bitmap? = null
-    private var pageWidth = 1
-    private var pageHeight = 1
     private var baseScale = 1f
     private var zoom = 1f
     private var offsetX = 0f
@@ -33,6 +26,10 @@ class PdfPageView @JvmOverloads constructor(
     private var lastTouchX = 0f
     private var lastTouchY = 0f
     private var dragging = false
+
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+        isDither = true
+    }
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -54,10 +51,9 @@ class PdfPageView @JvmOverloads constructor(
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            val target = if (zoom <= 1.05f) 2f else 1f
             val oldZoom = zoom
-            zoom = target
-            if (target == 1f) {
+            zoom = if (zoom <= 1.05f) 2f else 1f
+            if (zoom == 1f) {
                 offsetX = 0f
                 offsetY = 0f
             } else {
@@ -88,13 +84,12 @@ class PdfPageView @JvmOverloads constructor(
 
     fun showPage(renderer: PdfRenderer, pageIndex: Int) {
         val page = renderer.openPage(pageIndex)
-        pageWidth = max(1, page.width)
-        pageHeight = max(1, page.height)
-
-        // Render above screen resolution so ordinary zoom remains crisp.
+        val pageWidth = max(1, page.width)
+        val pageHeight = max(1, page.height)
         val targetWidth = max(1, width.takeIf { it > 0 } ?: pageWidth * 2)
         val renderScale = (targetWidth.toFloat() / pageWidth).coerceIn(1f, 3f)
         val targetHeight = max(1, (pageHeight * renderScale).toInt())
+
         bitmap?.recycle()
         bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
         bitmap!!.eraseColor(Color.WHITE)
@@ -113,6 +108,7 @@ class PdfPageView @JvmOverloads constructor(
         zoom = 1f
         offsetX = 0f
         offsetY = 0f
+        clampOffsets()
     }
 
     private fun clampOffsets() {
@@ -144,12 +140,16 @@ class PdfPageView @JvmOverloads constructor(
                 if (!scaleDetector.isInProgress && dragging && event.pointerCount == 1) {
                     val dx = event.x - lastTouchX
                     val dy = event.y - lastTouchY
-                    offsetX += dx
-                    offsetY += dy
-                    clampOffsets()
-                    lastTouchX = event.x
-                    lastTouchY = event.y
-                    invalidate()
+                    // GestureDetector also receives the event; manual movement is used only
+                    // as the direct drag path to keep the PDF responsive on slow devices.
+                    if (dx != 0f || dy != 0f) {
+                        offsetX += dx
+                        offsetY += dy
+                        clampOffsets()
+                        lastTouchX = event.x
+                        lastTouchY = event.y
+                        invalidate()
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
@@ -170,8 +170,7 @@ class PdfPageView @JvmOverloads constructor(
         val drawHeight = image.height * scale
         val left = (width - drawWidth) / 2f + offsetX
         val top = (height - drawHeight) / 2f + offsetY
-        val dest = RectF(left, top, left + drawWidth, top + drawHeight)
-        canvas.drawBitmap(image, null, dest, paint)
+        canvas.drawBitmap(image, null, RectF(left, top, left + drawWidth, top + drawHeight), paint)
     }
 
     override fun onDetachedFromWindow() {
