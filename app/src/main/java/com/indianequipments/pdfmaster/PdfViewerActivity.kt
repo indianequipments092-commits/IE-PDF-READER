@@ -15,6 +15,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -41,50 +42,38 @@ class PdfViewerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_viewer)
-
         WindowCompat.setDecorFitsSystemWindows(window, true)
         toolbar = findViewById(R.id.viewerToolbar)
         recyclerView = findViewById(R.id.pdfRecyclerView)
         pageIndicator = findViewById(R.id.pageIndicator)
         loading = findViewById(R.id.loading)
-
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.setHasFixedSize(false)
         recyclerView.itemAnimator = null
         recyclerView.setItemViewCacheSize(1)
-
         sourceUri = intent?.data
         pdfName = resolveDisplayName(sourceUri) ?: "PDF"
         findViewById<TextView>(R.id.pdfName).text = pdfName
-
         findViewById<ImageButton>(R.id.backButton).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.shareButton).setOnClickListener { sharePdf() }
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
-
-        // A tap on the PDF toggles BOTH the Android status bar and our PDF
-        // toolbar. They always appear/disappear together.
         recyclerView.setOnTouchListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN) toggleControls()
             false
         }
-
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
                 if (dy != 0 && controlsVisible) scheduleControlsHide(2000L)
             }
         })
-
         showControlsAndScheduleHide()
         openPdf(sourceUri)
     }
 
     private fun openPdf(uri: Uri?) {
-        if (uri == null) {
-            showError("No PDF was provided")
-            return
-        }
+        if (uri == null) { showError("No PDF was provided"); return }
         loading.visibility = View.VISIBLE
         Thread {
             try {
@@ -96,24 +85,15 @@ class PdfViewerActivity : AppCompatActivity() {
                     descriptor = fd
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
-
-                    val width = recyclerView.width.coerceAtLeast(1)
-                    adapter = PdfPageAdapter(pdfRenderer, width)
+                    adapter = PdfPageAdapter(pdfRenderer, recyclerView.width.coerceAtLeast(1))
                     recyclerView.adapter = adapter
-
-                    // A single-page PDF does not need a "1 / 1" indicator.
-                    // For multiple pages keep it centered at the bottom.
                     val multiplePages = pdfRenderer.pageCount > 1
                     pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
                     if (multiplePages) pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
-
                     showControlsAndScheduleHide()
                 }
             } catch (_: Exception) {
-                runOnUiThread {
-                    loading.visibility = View.GONE
-                    showError("This PDF could not be opened")
-                }
+                runOnUiThread { loading.visibility = View.GONE; showError("This PDF could not be opened") }
             }
         }.start()
     }
@@ -126,16 +106,13 @@ class PdfViewerActivity : AppCompatActivity() {
         if (first != RecyclerView.NO_POSITION) pageIndicator.text = "${first + 1} / $total"
     }
 
-    private fun toggleControls() {
-        if (controlsVisible) hideControls() else showControlsAndScheduleHide()
-    }
+    private fun toggleControls() { if (controlsVisible) hideControls() else showControlsAndScheduleHide() }
 
     private fun showControlsAndScheduleHide() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
         controlsVisible = true
         toolbar.visibility = View.VISIBLE
-        WindowInsetsControllerCompat(window, window.decorView)
-            .show(WindowInsetsCompat.Type.statusBars())
+        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
         scheduleControlsHide(2000L)
     }
 
@@ -150,15 +127,11 @@ class PdfViewerActivity : AppCompatActivity() {
         controlsHideRunnable = null
         controlsVisible = false
         toolbar.visibility = View.GONE
-        WindowInsetsControllerCompat(window, window.decorView)
-            .hide(WindowInsetsCompat.Type.statusBars())
+        WindowInsetsControllerCompat(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun sharePdf() {
-        val file = cachedFile ?: run {
-            Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val file = cachedFile ?: run { Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show(); return }
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
@@ -169,29 +142,21 @@ class PdfViewerActivity : AppCompatActivity() {
 
     private fun openWithAnotherApp() {
         val uri = sourceUri ?: cachedFile?.let { FileProvider.getUriForFile(this, "$packageName.fileprovider", it) }
-        if (uri == null) {
-            Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (uri == null) { Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show(); return }
         try {
             startActivity(Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/pdf")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             })
-        } catch (_: Exception) {
-            Toast.makeText(this, "No compatible PDF app found", Toast.LENGTH_SHORT).show()
-        }
+        } catch (_: Exception) { Toast.makeText(this, "No compatible PDF app found", Toast.LENGTH_SHORT).show() }
     }
 
     private fun showInfo() {
         val pages = renderer?.pageCount ?: 0
         val size = cachedFile?.length()?.let { formatSize(it) } ?: "Unknown"
-        val location = sourceUri?.toString() ?: "Unknown"
-        AlertDialog.Builder(this)
-            .setTitle("PDF information")
-            .setMessage("Name: $pdfName\nSize: $size\nPages: $pages\nLocation: $location")
-            .setPositiveButton("OK", null)
-            .show()
+        AlertDialog.Builder(this).setTitle("PDF information")
+            .setMessage("Name: $pdfName\nSize: $size\nPages: $pages\nLocation: ${sourceUri ?: "Unknown"}")
+            .setPositiveButton("OK", null).show()
     }
 
     private fun formatSize(bytes: Long): String = when {
@@ -215,15 +180,10 @@ class PdfViewerActivity : AppCompatActivity() {
         return try {
             cursor = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             if (cursor?.moveToFirst() == true) cursor.getString(0) else uri.lastPathSegment
-        } finally {
-            cursor?.close()
-        }
+        } finally { cursor?.close() }
     }
 
-    private fun showError(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        finish()
-    }
+    private fun showError(message: String) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); finish() }
 
     override fun onDestroy() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
