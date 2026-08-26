@@ -2,12 +2,14 @@ package com.indianequipments.pdfmaster
 
 import android.content.Intent
 import android.database.Cursor
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
+import android.view.MotionEvent
 import android.view.View
-import android.widget.Button
+import android.view.Window
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -15,31 +17,41 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import java.io.FileOutputStream
 
 class PdfViewerActivity : AppCompatActivity() {
-    private var renderer: PdfRenderer? = null
+    private var renderer: android.graphics.pdf.PdfRenderer? = null
     private var descriptor: android.os.ParcelFileDescriptor? = null
-    private var currentPage = 0
-    private lateinit var pageView: PdfPageView
+    private lateinit var recyclerView: RecyclerView
     private lateinit var pageIndicator: TextView
-    private lateinit var previousButton: Button
-    private lateinit var nextButton: Button
     private lateinit var loading: ProgressBar
+    private lateinit var toolbar: View
     private var pdfName = "PDF"
     private var cachedFile: File? = null
     private var sourceUri: Uri? = null
+    private var adapter: PdfPageAdapter? = null
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var revealRunnable: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_viewer)
 
-        pageView = findViewById(R.id.pdfPageView)
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        toolbar = findViewById(R.id.viewerToolbar)
+        recyclerView = findViewById(R.id.pdfRecyclerView)
         pageIndicator = findViewById(R.id.pageIndicator)
-        previousButton = findViewById(R.id.previousButton)
-        nextButton = findViewById(R.id.nextButton)
         loading = findViewById(R.id.loading)
+
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.setHasFixedSize(false)
+        recyclerView.itemAnimator = null
 
         sourceUri = intent?.data
         pdfName = resolveDisplayName(sourceUri) ?: "PDF"
@@ -49,8 +61,18 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.shareButton).setOnClickListener { sharePdf() }
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
-        previousButton.setOnClickListener { showPage(currentPage - 1) }
-        nextButton.setOnClickListener { showPage(currentPage + 1) }
+
+        recyclerView.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) revealControlsTemporarily()
+            false
+        }
+
+        recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                updateCurrentPage()
+                if (dy != 0) hideControlsSoon()
+            }
+        })
 
         openPdf(sourceUri)
     }
@@ -64,14 +86,18 @@ class PdfViewerActivity : AppCompatActivity() {
         Thread {
             try {
                 val file = copyToCache(uri)
-                cachedFile = file
                 val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                val pdfRenderer = PdfRenderer(fd)
+                val pdfRenderer = android.graphics.pdf.PdfRenderer(fd)
                 runOnUiThread {
+                    cachedFile = file
                     descriptor = fd
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
-                    showPage(0)
+                    val width = resources.displayMetrics.widthPixels - 20
+                    adapter = PdfPageAdapter(pdfRenderer, width)
+                    recyclerView.adapter = adapter
+                    pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
+                    revealControlsTemporarily()
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -82,19 +108,34 @@ class PdfViewerActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun showPage(index: Int) {
-        val pdf = renderer ?: return
-        if (index !in 0 until pdf.pageCount) return
-        currentPage = index
-        pageView.showPage(pdf, index)
-        pageIndicator.text = "${index + 1} / ${pdf.pageCount}"
-        previousButton.isEnabled = index > 0
-        nextButton.isEnabled = index < pdf.pageCount - 1
+    private fun updateCurrentPage() {
+        val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
+        val first = lm.findFirstVisibleItemPosition()
+        val total = renderer?.pageCount ?: return
+        if (first != RecyclerView.NO_POSITION) pageIndicator.text = "${first + 1} / $total"
+    }
+
+    private fun revealControlsTemporarily() {
+        toolbar.visibility = View.VISIBLE
+        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
+        revealRunnable?.let(uiHandler::removeCallbacks)
+        revealRunnable = Runnable { hideControls() }
+        uiHandler.postDelayed(revealRunnable!!, 3000L)
+    }
+
+    private fun hideControlsSoon() {
+        revealRunnable?.let(uiHandler::removeCallbacks)
+        revealRunnable = Runnable { hideControls() }
+        uiHandler.postDelayed(revealRunnable!!, 1200L)
+    }
+
+    private fun hideControls() {
+        toolbar.visibility = View.GONE
+        WindowInsetsControllerCompat(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun sharePdf() {
-        val file = cachedFile
-        if (file == null) {
+        val file = cachedFile ?: run {
             Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
             return
         }
@@ -107,9 +148,7 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     private fun openWithAnotherApp() {
-        val uri = sourceUri ?: cachedFile?.let {
-            FileProvider.getUriForFile(this, "$packageName.fileprovider", it)
-        }
+        val uri = sourceUri ?: cachedFile?.let { FileProvider.getUriForFile(this, "$packageName.fileprovider", it) }
         if (uri == null) {
             Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
             return
@@ -167,6 +206,9 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        revealRunnable?.let(uiHandler::removeCallbacks)
+        adapter?.shutdown()
+        recyclerView.adapter = null
         renderer?.close()
         descriptor?.close()
         cachedFile?.delete()
