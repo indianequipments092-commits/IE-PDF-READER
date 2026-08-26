@@ -3,6 +3,8 @@
     <application
         android:allowBackup="true"
         android:label="PDF MASTER"
+        android:icon="@drawable/ic_pdf_master"
+        android:roundIcon="@drawable/ic_pdf_master"
         android:supportsRtl="true"
         android:theme="@style/Theme.PdfMaster">
         <activity
