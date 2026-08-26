@@ -14,6 +14,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 
@@ -28,6 +29,7 @@ class PdfViewerActivity : AppCompatActivity() {
     private lateinit var loading: ProgressBar
     private var pdfName = "PDF"
     private var cachedFile: File? = null
+    private var sourceUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,16 +41,18 @@ class PdfViewerActivity : AppCompatActivity() {
         nextButton = findViewById(R.id.nextButton)
         loading = findViewById(R.id.loading)
 
-        pdfName = resolveDisplayName(intent?.data) ?: "PDF"
+        sourceUri = intent?.data
+        pdfName = resolveDisplayName(sourceUri) ?: "PDF"
         findViewById<TextView>(R.id.pdfName).text = pdfName
 
         findViewById<ImageButton>(R.id.backButton).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.shareButton).setOnClickListener { sharePdf() }
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
+        findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
         previousButton.setOnClickListener { showPage(currentPage - 1) }
         nextButton.setOnClickListener { showPage(currentPage + 1) }
 
-        openPdf(intent?.data)
+        openPdf(sourceUri)
     }
 
     private fun openPdf(uri: Uri?) {
@@ -69,7 +73,7 @@ class PdfViewerActivity : AppCompatActivity() {
                     loading.visibility = View.GONE
                     showPage(0)
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 runOnUiThread {
                     loading.visibility = View.GONE
                     showError("This PDF could not be opened")
@@ -94,7 +98,7 @@ class PdfViewerActivity : AppCompatActivity() {
             Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
             return
         }
-        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
             putExtra(Intent.EXTRA_STREAM, uri)
@@ -102,13 +106,39 @@ class PdfViewerActivity : AppCompatActivity() {
         }, "Share PDF"))
     }
 
+    private fun openWithAnotherApp() {
+        val uri = sourceUri ?: cachedFile?.let {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", it)
+        }
+        if (uri == null) {
+            Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (_: Exception) {
+            Toast.makeText(this, "No compatible PDF app found", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun showInfo() {
         val pages = renderer?.pageCount ?: 0
+        val size = cachedFile?.length()?.let { formatSize(it) } ?: "Unknown"
+        val location = sourceUri?.toString() ?: "Unknown"
         AlertDialog.Builder(this)
             .setTitle("PDF information")
-            .setMessage("Name: $pdfName\nPages: $pages")
+            .setMessage("Name: $pdfName\nSize: $size\nPages: $pages\nLocation: $location")
             .setPositiveButton("OK", null)
             .show()
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1024 * 1024 -> String.format("%.2f MB", bytes / (1024f * 1024f))
+        bytes >= 1024 -> String.format("%.1f KB", bytes / 1024f)
+        else -> "$bytes B"
     }
 
     private fun copyToCache(uri: Uri): File {
