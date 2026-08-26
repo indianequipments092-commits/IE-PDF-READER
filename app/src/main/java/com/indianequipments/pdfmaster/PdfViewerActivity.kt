@@ -61,8 +61,11 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
 
+        // Once the reader is open, touching the PDF means the user is reading.
+        // Hide the transient system status bar immediately instead of restarting
+        // the reveal timer on every touch.
         recyclerView.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) revealControlsTemporarily()
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) hideControlsImmediately()
             false
         }
 
@@ -93,7 +96,11 @@ class PdfViewerActivity : AppCompatActivity() {
                     descriptor = fd
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
-                    val width = resources.displayMetrics.widthPixels - 20
+
+                    // Render to the actual reader width, not the physical display
+                    // width. This keeps the page exactly inside the RecyclerView
+                    // after status/navigation insets are applied.
+                    val width = recyclerView.width.coerceAtLeast(1)
                     adapter = PdfPageAdapter(pdfRenderer, width)
                     recyclerView.adapter = adapter
                     pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
@@ -127,6 +134,12 @@ class PdfViewerActivity : AppCompatActivity() {
         revealRunnable?.let(uiHandler::removeCallbacks)
         revealRunnable = Runnable { hideControls() }
         uiHandler.postDelayed(revealRunnable!!, 1200L)
+    }
+
+    private fun hideControlsImmediately() {
+        revealRunnable?.let(uiHandler::removeCallbacks)
+        revealRunnable = null
+        hideControls()
     }
 
     private fun hideControls() {
