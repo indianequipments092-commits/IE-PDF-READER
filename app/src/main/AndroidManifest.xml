@@ -6,6 +6,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PdfMaster">
         <activity
+            android:name=".PdfViewerActivity"
+            android:screenOrientation="unspecified"
+            android:exported="false" />
+        <activity
             android:name=".MainActivity"
             android:screenOrientation="unspecified"
             android:exported="true">
@@ -20,5 +24,14 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
