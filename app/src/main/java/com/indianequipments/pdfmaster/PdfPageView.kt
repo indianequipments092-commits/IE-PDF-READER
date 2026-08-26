@@ -4,49 +4,174 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import android.util.AttributeSet
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.max
+import kotlin.math.min
 
 class PdfPageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        isDither = true
+    }
     private var bitmap: Bitmap? = null
+    private var pageWidth = 1
+    private var pageHeight = 1
+    private var baseScale = 1f
+    private var zoom = 1f
+    private var offsetX = 0f
+    private var offsetY = 0f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var dragging = false
+
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val oldZoom = zoom
+            zoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
+            if (zoom != oldZoom) {
+                val focusX = detector.focusX
+                val focusY = detector.focusY
+                offsetX = focusX - (focusX - offsetX) * (zoom / oldZoom)
+                offsetY = focusY - (focusY - offsetY) * (zoom / oldZoom)
+                clampOffsets()
+                invalidate()
+            }
+            return true
+        }
+    })
+
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean = true
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            val target = if (zoom <= 1.05f) 2f else 1f
+            val oldZoom = zoom
+            zoom = target
+            if (target == 1f) {
+                offsetX = 0f
+                offsetY = 0f
+            } else {
+                offsetX = e.x - (e.x - offsetX) * (zoom / oldZoom)
+                offsetY = e.y - (e.y - offsetY) * (zoom / oldZoom)
+                clampOffsets()
+            }
+            invalidate()
+            return true
+        }
+
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            if (zoom > 1.001f) {
+                offsetX -= distanceX
+                offsetY -= distanceY
+                clampOffsets()
+                invalidate()
+                return true
+            }
+            return false
+        }
+    })
 
     init {
         setBackgroundColor(Color.rgb(224, 224, 224))
+        isClickable = true
     }
 
     fun showPage(renderer: PdfRenderer, pageIndex: Int) {
         val page = renderer.openPage(pageIndex)
-        val width = maxOf(1, page.width)
-        val height = maxOf(1, page.height)
-        val targetWidth = maxOf(1, width)
-        val targetHeight = maxOf(1, (height.toFloat() * targetWidth / width).toInt())
+        pageWidth = max(1, page.width)
+        pageHeight = max(1, page.height)
+
+        // Render above screen resolution so ordinary zoom remains crisp.
+        val targetWidth = max(1, width.takeIf { it > 0 } ?: pageWidth * 2)
+        val renderScale = (targetWidth.toFloat() / pageWidth).coerceIn(1f, 3f)
+        val targetHeight = max(1, (pageHeight * renderScale).toInt())
         bitmap?.recycle()
         bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
         bitmap!!.eraseColor(Color.WHITE)
         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         page.close()
+
+        resetToFit()
         invalidate()
+    }
+
+    private fun resetToFit() {
+        val image = bitmap ?: return
+        val availableWidth = width.toFloat().coerceAtLeast(1f)
+        val availableHeight = height.toFloat().coerceAtLeast(1f)
+        baseScale = min(availableWidth / image.width, availableHeight / image.height)
+        zoom = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+
+    private fun clampOffsets() {
+        val image = bitmap ?: return
+        val scale = baseScale * zoom
+        val drawWidth = image.width * scale
+        val drawHeight = image.height * scale
+        val maxX = max(0f, (drawWidth - width) / 2f)
+        val maxY = max(0f, (drawHeight - height) / 2f)
+        offsetX = offsetX.coerceIn(-maxX, maxX)
+        offsetY = offsetY.coerceIn(-maxY, maxY)
+    }
+
+    fun resetZoom() {
+        resetToFit()
+        invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(event)
+        gestureDetector.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouchX = event.x
+                lastTouchY = event.y
+                dragging = zoom > 1.001f
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!scaleDetector.isInProgress && dragging && event.pointerCount == 1) {
+                    val dx = event.x - lastTouchX
+                    val dy = event.y - lastTouchY
+                    offsetX += dx
+                    offsetY += dy
+                    clampOffsets()
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
+        }
+        return true
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (oldw == 0 || oldh == 0) resetToFit()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val image = bitmap ?: return
-        val availableWidth = width.toFloat()
-        val availableHeight = height.toFloat()
-        val scale = minOf(availableWidth / image.width, availableHeight / image.height)
+        val scale = baseScale * zoom
         val drawWidth = image.width * scale
         val drawHeight = image.height * scale
-        val left = (availableWidth - drawWidth) / 2f
-        val top = (availableHeight - drawHeight) / 2f
-        canvas.drawBitmap(image, null, Rect(left.toInt(), top.toInt(), (left + drawWidth).toInt(), (top + drawHeight).toInt()), paint)
+        val left = (width - drawWidth) / 2f + offsetX
+        val top = (height - drawHeight) / 2f + offsetY
+        val dest = RectF(left, top, left + drawWidth, top + drawHeight)
+        canvas.drawBitmap(image, null, dest, paint)
     }
 
     override fun onDetachedFromWindow() {
