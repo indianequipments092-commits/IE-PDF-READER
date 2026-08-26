@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.RectF
-import android.graphics.pdf.PdfRenderer
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -43,6 +42,7 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
+
         override fun onDoubleTap(e: MotionEvent): Boolean {
             val oldZoom = zoom
             zoom = if (zoom <= 1.05f) 2f else 1f
@@ -58,6 +58,7 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             invalidate()
             return true
         }
+
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
             if (zoom > 1.001f) {
                 offsetX -= distanceX
@@ -71,36 +72,31 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     })
 
     init {
-        setBackgroundColor(Color.rgb(224, 224, 224))
+        setBackgroundColor(Color.WHITE)
         isClickable = true
     }
 
-    fun showPage(renderer: PdfRenderer, pageIndex: Int) {
-        if (pageIndex !in 0 until renderer.pageCount) return
-        val page = renderer.openPage(pageIndex)
-        try {
-            val pageWidth = max(1, page.width)
-            val pageHeight = max(1, page.height)
-            val targetWidth = max(1, width.takeIf { it > 0 } ?: pageWidth * 2)
-            val renderScale = (targetWidth.toFloat() / pageWidth).coerceIn(1f, 4f)
-            val targetHeight = max(1, (pageHeight * renderScale).toInt())
-            val newBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-            newBitmap.eraseColor(Color.WHITE)
-            page.render(newBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            bitmap?.recycle()
-            bitmap = newBitmap
-        } finally {
-            page.close()
-        }
+    fun setRenderedBitmap(newBitmap: Bitmap) {
+        val old = bitmap
+        bitmap = newBitmap
+        old?.let { if (!it.isRecycled && it !== newBitmap) it.recycle() }
         resetToFit()
+        invalidate()
+    }
+
+    fun clearPage() {
+        bitmap?.let { if (!it.isRecycled) it.recycle() }
+        bitmap = null
+        zoom = 1f
+        offsetX = 0f
+        offsetY = 0f
         invalidate()
     }
 
     private fun resetToFit() {
         val image = bitmap ?: return
         val availableWidth = width.toFloat().coerceAtLeast(1f)
-        val availableHeight = height.toFloat().coerceAtLeast(1f)
-        baseScale = min(availableWidth / image.width, availableHeight / image.height)
+        baseScale = (availableWidth / image.width).coerceIn(0.01f, 1f)
         zoom = 1f
         offsetX = 0f
         offsetY = 0f
@@ -127,23 +123,35 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { lastTouchX = event.x; lastTouchY = event.y; dragging = zoom > 1.001f }
-            MotionEvent.ACTION_MOVE -> if (!scaleDetector.isInProgress && dragging && event.pointerCount == 1) {
-                offsetX += event.x - lastTouchX
-                offsetY += event.y - lastTouchY
+            MotionEvent.ACTION_DOWN -> {
                 lastTouchX = event.x
                 lastTouchY = event.y
-                clampOffsets()
-                invalidate()
+                dragging = zoom > 1.001f
+                if (dragging) parent.requestDisallowInterceptTouchEvent(true)
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
+            MotionEvent.ACTION_MOVE -> {
+                if (!scaleDetector.isInProgress && dragging && event.pointerCount == 1) {
+                    offsetX += event.x - lastTouchX
+                    offsetY += event.y - lastTouchY
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    clampOffsets()
+                    invalidate()
+                } else if (!scaleDetector.isInProgress && zoom <= 1.001f) {
+                    parent.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                dragging = false
+                parent.requestDisallowInterceptTouchEvent(false)
+            }
         }
         return true
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (bitmap != null && w != oldw || bitmap != null && h != oldh) resetToFit()
+        if (bitmap != null && (w != oldw || h != oldh)) resetToFit()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -158,7 +166,7 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
 
     override fun onDetachedFromWindow() {
-        bitmap?.recycle()
+        bitmap?.let { if (!it.isRecycled) it.recycle() }
         bitmap = null
         super.onDetachedFromWindow()
     }
