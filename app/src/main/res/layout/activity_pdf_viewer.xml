@@ -1,18 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#202124">
+    android:background="#E0E0E0">
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/pdfRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:overScrollMode="ifContentScrolls"
+        android:paddingBottom="12dp" />
 
     <LinearLayout
         android:id="@+id/viewerToolbar"
         android:layout_width="match_parent"
         android:layout_height="56dp"
+        android:layout_gravity="top"
         android:gravity="center_vertical"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:background="#101114">
+        android:background="#101114"
+        android:elevation="8dp">
 
         <ImageButton
             android:id="@+id/backButton"
@@ -20,7 +29,8 @@
             android:layout_height="48dp"
             android:background="@android:color/transparent"
             android:contentDescription="Back"
-            android:src="@android:drawable/ic_menu_revert" />
+            android:src="@android:drawable/ic_menu_revert"
+            android:tint="#FFFFFF" />
 
         <TextView
             android:id="@+id/pdfName"
@@ -41,7 +51,8 @@
             android:layout_height="48dp"
             android:background="@android:color/transparent"
             android:contentDescription="PDF information"
-            android:src="@android:drawable/ic_menu_info_details" />
+            android:src="@android:drawable/ic_menu_info_details"
+            android:tint="#FFFFFF" />
 
         <ImageButton
             android:id="@+id/shareButton"
@@ -49,7 +60,8 @@
             android:layout_height="48dp"
             android:background="@android:color/transparent"
             android:contentDescription="Share PDF"
-            android:src="@android:drawable/ic_menu_share" />
+            android:src="@android:drawable/ic_menu_share"
+            android:tint="#FFFFFF" />
 
         <ImageButton
             android:id="@+id/openWithButton"
@@ -57,57 +69,27 @@
             android:layout_height="48dp"
             android:background="@android:color/transparent"
             android:contentDescription="Open with another app"
-            android:src="@android:drawable/ic_menu_view" />
+            android:src="@android:drawable/ic_menu_view"
+            android:tint="#FFFFFF" />
     </LinearLayout>
 
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
 
-        <com.indianequipments.pdfmaster.PdfPageView
-            android:id="@+id/pdfPageView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-        <ProgressBar
-            android:id="@+id/loading"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center" />
-    </FrameLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:gravity="center"
-        android:background="#101114">
-
-        <Button
-            android:id="@+id/previousButton"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:minWidth="88dp"
-            android:text="‹ Prev"
-            android:textAllCaps="false" />
-
-        <TextView
-            android:id="@+id/pageIndicator"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="20dp"
-            android:layout_marginEnd="20dp"
-            android:minWidth="64dp"
-            android:gravity="center"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/nextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:minWidth="88dp"
-            android:text="Next ›"
-            android:textAllCaps="false" />
-    </LinearLayout>
-</LinearLayout>
+    <TextView
+        android:id="@+id/pageIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="#CC101114"
+        android:paddingStart="14dp"
+        android:paddingTop="7dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="7dp"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp" />
+</FrameLayout>
