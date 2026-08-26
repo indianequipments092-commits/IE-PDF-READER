@@ -35,15 +35,13 @@ class PdfViewerActivity : AppCompatActivity() {
     private var sourceUri: Uri? = null
     private var adapter: PdfPageAdapter? = null
     private val uiHandler = Handler(Looper.getMainLooper())
-    private var statusBarHideRunnable: Runnable? = null
-    private var statusBarVisible = true
+    private var controlsHideRunnable: Runnable? = null
+    private var controlsVisible = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_viewer)
 
-        // Keep the app content below the system status bar. The PDF toolbar is
-        // independent and must never disappear together with the status bar.
         WindowCompat.setDecorFitsSystemWindows(window, true)
         toolbar = findViewById(R.id.viewerToolbar)
         recyclerView = findViewById(R.id.pdfRecyclerView)
@@ -64,21 +62,21 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
 
-        // PDF tap controls ONLY the Android status bar. The reader toolbar
-        // stays visible at all times, just like a normal PDF reader.
+        // A tap on the PDF toggles BOTH the Android status bar and our PDF
+        // toolbar. They always appear/disappear together.
         recyclerView.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) toggleStatusBar()
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) toggleControls()
             false
         }
 
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
-                if (dy != 0 && statusBarVisible) scheduleStatusBarHide(2000L)
+                if (dy != 0 && controlsVisible) scheduleControlsHide(2000L)
             }
         })
 
-        showStatusBarAndScheduleHide()
+        showControlsAndScheduleHide()
         openPdf(sourceUri)
     }
 
@@ -99,13 +97,17 @@ class PdfViewerActivity : AppCompatActivity() {
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
 
-                    // Render using the actual reader width so the page fits the
-                    // available PDF area, not the physical display width.
                     val width = recyclerView.width.coerceAtLeast(1)
                     adapter = PdfPageAdapter(pdfRenderer, width)
                     recyclerView.adapter = adapter
-                    pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
-                    showStatusBarAndScheduleHide()
+
+                    // A single-page PDF does not need a "1 / 1" indicator.
+                    // For multiple pages keep it centered at the bottom.
+                    val multiplePages = pdfRenderer.pageCount > 1
+                    pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
+                    if (multiplePages) pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
+
+                    showControlsAndScheduleHide()
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -120,35 +122,34 @@ class PdfViewerActivity : AppCompatActivity() {
         val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
         val first = lm.findFirstVisibleItemPosition()
         val total = renderer?.pageCount ?: return
+        if (total <= 1) return
         if (first != RecyclerView.NO_POSITION) pageIndicator.text = "${first + 1} / $total"
     }
 
-    private fun toggleStatusBar() {
-        if (statusBarVisible) {
-            hideStatusBar()
-        } else {
-            showStatusBarAndScheduleHide()
-        }
+    private fun toggleControls() {
+        if (controlsVisible) hideControls() else showControlsAndScheduleHide()
     }
 
-    private fun showStatusBarAndScheduleHide() {
-        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
-        statusBarVisible = true
+    private fun showControlsAndScheduleHide() {
+        controlsHideRunnable?.let(uiHandler::removeCallbacks)
+        controlsVisible = true
+        toolbar.visibility = View.VISIBLE
         WindowInsetsControllerCompat(window, window.decorView)
             .show(WindowInsetsCompat.Type.statusBars())
-        scheduleStatusBarHide(2000L)
+        scheduleControlsHide(2000L)
     }
 
-    private fun scheduleStatusBarHide(delayMs: Long) {
-        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
-        statusBarHideRunnable = Runnable { hideStatusBar() }
-        uiHandler.postDelayed(statusBarHideRunnable!!, delayMs)
+    private fun scheduleControlsHide(delayMs: Long) {
+        controlsHideRunnable?.let(uiHandler::removeCallbacks)
+        controlsHideRunnable = Runnable { hideControls() }
+        uiHandler.postDelayed(controlsHideRunnable!!, delayMs)
     }
 
-    private fun hideStatusBar() {
-        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
-        statusBarHideRunnable = null
-        statusBarVisible = false
+    private fun hideControls() {
+        controlsHideRunnable?.let(uiHandler::removeCallbacks)
+        controlsHideRunnable = null
+        controlsVisible = false
+        toolbar.visibility = View.GONE
         WindowInsetsControllerCompat(window, window.decorView)
             .hide(WindowInsetsCompat.Type.statusBars())
     }
@@ -225,7 +226,7 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        statusBarHideRunnable?.let(uiHandler::removeCallbacks)
+        controlsHideRunnable?.let(uiHandler::removeCallbacks)
         adapter?.shutdown()
         recyclerView.adapter = null
         renderer?.close()
