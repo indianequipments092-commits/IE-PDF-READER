@@ -31,6 +31,7 @@ class PdfViewerActivity : AppCompatActivity() {
     private lateinit var pageIndicator: TextView
     private lateinit var loading: ProgressBar
     private lateinit var toolbar: View
+    private lateinit var insetsController: WindowInsetsControllerCompat
     private var pdfName = "PDF"
     private var cachedFile: File? = null
     private var sourceUri: Uri? = null
@@ -46,6 +47,12 @@ class PdfViewerActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = android.graphics.Color.rgb(16, 17, 20)
         window.navigationBarColor = android.graphics.Color.BLACK
+
+        insetsController = WindowInsetsControllerCompat(window, window.decorView).apply {
+            // A hidden status bar must not pop back in just because the PDF is touched.
+            // System-bar gestures remain available, while normal PDF taps stay app-controlled.
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
 
         toolbar = findViewById(R.id.viewerToolbar)
         recyclerView = findViewById(R.id.pdfRecyclerView)
@@ -93,8 +100,6 @@ class PdfViewerActivity : AppCompatActivity() {
                     loading.visibility = View.GONE
                     multiplePages = pdfRenderer.pageCount > 1
 
-                    // RecyclerView width is not reliable during onCreate (it can still be 0/1px).
-                    // Wait for layout so every page is rendered at the actual screen width.
                     recyclerView.post {
                         adapter = PdfPageAdapter(
                             pdfRenderer,
@@ -134,18 +139,23 @@ class PdfViewerActivity : AppCompatActivity() {
 
     private fun showControlsAndScheduleHide() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
+        controlsHideRunnable = null
         controlsVisible = true
         toolbar.visibility = View.VISIBLE
         pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
         setRecyclerBottomInset(toolbarVisible = true)
-        WindowInsetsControllerCompat(window, window.decorView)
-            .show(WindowInsetsCompat.Type.statusBars())
+        insetsController.show(WindowInsetsCompat.Type.statusBars())
         scheduleControlsHide(2000L)
     }
 
     private fun scheduleControlsHide(delayMs: Long) {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
-        controlsHideRunnable = Runnable { hideControls() }
+        controlsHideRunnable = Runnable {
+            controlsHideRunnable = null
+            // The runnable is the only path that performs the automatic hide.
+            // A later tap always cancels/replaces this runnable before it can fire.
+            hideControls()
+        }
         uiHandler.postDelayed(controlsHideRunnable!!, delayMs)
     }
 
@@ -156,8 +166,7 @@ class PdfViewerActivity : AppCompatActivity() {
         toolbar.visibility = View.GONE
         pageIndicator.visibility = View.GONE
         setRecyclerBottomInset(toolbarVisible = false)
-        WindowInsetsControllerCompat(window, window.decorView)
-            .hide(WindowInsetsCompat.Type.statusBars())
+        insetsController.hide(WindowInsetsCompat.Type.statusBars())
     }
 
     private fun setRecyclerBottomInset(toolbarVisible: Boolean) {
