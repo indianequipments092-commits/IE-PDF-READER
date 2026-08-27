@@ -11,8 +11,8 @@ android {
         applicationId = "com.indianequipments.pdfmaster"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     compileOptions {
@@ -28,4 +28,5 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }
