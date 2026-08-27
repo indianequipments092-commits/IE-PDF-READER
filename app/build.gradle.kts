@@ -11,8 +11,8 @@ android {
         applicationId = "com.indianequipments.pdfmaster"
         minSdk = 23
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     compileOptions {
@@ -26,8 +26,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Keep PDF rendering/runtime behavior reliable. PDFBox contains
+            // runtime-loaded resources/classes, so release shrinking is disabled
+            // until the viewer is fully verified.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
