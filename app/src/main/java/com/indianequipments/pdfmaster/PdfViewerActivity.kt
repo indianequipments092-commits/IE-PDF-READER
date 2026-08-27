@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -37,11 +38,15 @@ class PdfViewerActivity : AppCompatActivity() {
     private val uiHandler = Handler(Looper.getMainLooper())
     private var controlsHideRunnable: Runnable? = null
     private var controlsVisible = true
+    private var multiplePages = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_viewer)
         WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.statusBarColor = android.graphics.Color.rgb(16, 17, 20)
+        window.navigationBarColor = android.graphics.Color.BLACK
+
         toolbar = findViewById(R.id.viewerToolbar)
         recyclerView = findViewById(R.id.pdfRecyclerView)
         pageIndicator = findViewById(R.id.pageIndicator)
@@ -50,6 +55,7 @@ class PdfViewerActivity : AppCompatActivity() {
         recyclerView.setHasFixedSize(false)
         recyclerView.itemAnimator = null
         recyclerView.setItemViewCacheSize(2)
+
         sourceUri = intent?.data
         pdfName = resolveDisplayName(sourceUri) ?: "PDF"
         findViewById<TextView>(R.id.pdfName).text = pdfName
@@ -57,12 +63,14 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.shareButton).setOnClickListener { sharePdf() }
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
+
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
                 if (dy != 0 && controlsVisible) scheduleControlsHide(2000L)
             }
         })
+
         showControlsAndScheduleHide()
         openPdf(sourceUri)
     }
@@ -83,16 +91,21 @@ class PdfViewerActivity : AppCompatActivity() {
                     descriptor = fd
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
-                    adapter = PdfPageAdapter(
-                        pdfRenderer,
-                        recyclerView.width.coerceAtLeast(1),
-                        onPageTap = { toggleControls() }
-                    )
-                    recyclerView.adapter = adapter
-                    val multiplePages = pdfRenderer.pageCount > 1
-                    pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
-                    if (multiplePages) pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
-                    showControlsAndScheduleHide()
+                    multiplePages = pdfRenderer.pageCount > 1
+
+                    // RecyclerView width is not reliable during onCreate (it can still be 0/1px).
+                    // Wait for layout so every page is rendered at the actual screen width.
+                    recyclerView.post {
+                        adapter = PdfPageAdapter(
+                            pdfRenderer,
+                            recyclerView.width.coerceAtLeast(1),
+                            onPageTap = { toggleControls() }
+                        )
+                        recyclerView.adapter = adapter
+                        pageIndicator.visibility = if (multiplePages && controlsVisible) View.VISIBLE else View.GONE
+                        if (multiplePages) pageIndicator.text = "1 / ${pdfRenderer.pageCount}"
+                        showControlsAndScheduleHide()
+                    }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -112,14 +125,21 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     private fun toggleControls() {
-        if (controlsVisible) hideControls() else showControlsAndScheduleHide()
+        if (controlsVisible) {
+            hideControls()
+        } else {
+            showControlsAndScheduleHide()
+        }
     }
 
     private fun showControlsAndScheduleHide() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
         controlsVisible = true
         toolbar.visibility = View.VISIBLE
-        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
+        pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
+        setRecyclerBottomInset(toolbarVisible = true)
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.statusBars())
         scheduleControlsHide(2000L)
     }
 
@@ -134,8 +154,23 @@ class PdfViewerActivity : AppCompatActivity() {
         controlsHideRunnable = null
         controlsVisible = false
         toolbar.visibility = View.GONE
-        WindowInsetsControllerCompat(window, window.decorView).hide(WindowInsetsCompat.Type.statusBars())
+        pageIndicator.visibility = View.GONE
+        setRecyclerBottomInset(toolbarVisible = false)
+        WindowInsetsControllerCompat(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.statusBars())
     }
+
+    private fun setRecyclerBottomInset(toolbarVisible: Boolean) {
+        val params = recyclerView.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val targetBottom = if (toolbarVisible) dp(72) else 0
+        if (params.bottomMargin != targetBottom) {
+            params.bottomMargin = targetBottom
+            recyclerView.layoutParams = params
+        }
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density + 0.5f).toInt()
 
     private fun sharePdf() {
         val file = cachedFile ?: run {
