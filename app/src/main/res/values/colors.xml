@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="pdf_master_background">#101114</color>
-    <color name="pdf_master_surface">#202124</color>
-    <color name="pdf_master_text">#FFFFFF</color>
-    <color name="pdf_master_muted">#B9BCC5</color>
-</resources>
