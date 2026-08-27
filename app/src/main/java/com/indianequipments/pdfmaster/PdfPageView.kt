@@ -10,6 +10,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewConfiguration
 import kotlin.math.max
 
 class PdfPageView @JvmOverloads constructor(
@@ -25,6 +26,7 @@ class PdfPageView @JvmOverloads constructor(
     private var offsetY = 0f
     private var lastTouchX = 0f
     private var lastTouchY = 0f
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
     private val paint = android.graphics.Paint(
         android.graphics.Paint.ANTI_ALIAS_FLAG or
@@ -46,8 +48,7 @@ class PdfPageView @JvmOverloads constructor(
                 val newZoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
                 val newScale = baseScale * newZoom
 
-                // Keep the PDF point under the two-finger midpoint fixed.
-                // This prevents zoom from jumping toward a page corner.
+                // Keep the PDF point under the actual two-finger midpoint fixed.
                 val centerX = width / 2f
                 val centerY = height / 2f
                 val contentX = (detector.focusX - centerX - offsetX) / oldScale
@@ -62,7 +63,7 @@ class PdfPageView @JvmOverloads constructor(
             }
 
             override fun onScaleEnd(detector: ScaleGestureDetector) {
-                parent.requestDisallowInterceptTouchEvent(false)
+                parent.requestDisallowInterceptTouchEvent(true)
             }
         }
     )
@@ -157,7 +158,9 @@ class PdfPageView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 lastTouchX = event.x
                 lastTouchY = event.y
-                parent.requestDisallowInterceptTouchEvent(false)
+                // Keep the initial DOWN in this view so a real tap is never lost
+                // to RecyclerView before GestureDetector can confirm it.
+                parent.requestDisallowInterceptTouchEvent(true)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -165,22 +168,26 @@ class PdfPageView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (!scaleDetector.isInProgress && event.pointerCount == 1 && zoom > 1.001f) {
-                    parent.requestDisallowInterceptTouchEvent(true)
-                    offsetX += event.x - lastTouchX
-                    offsetY += event.y - lastTouchY
-                    lastTouchX = event.x
-                    lastTouchY = event.y
-                    clampOffsets()
-                    invalidate()
-                } else if (!scaleDetector.isInProgress && event.pointerCount == 1) {
-                    lastTouchX = event.x
-                    lastTouchY = event.y
+                val dx = event.x - lastTouchX
+                val dy = event.y - lastTouchY
+                if (!scaleDetector.isInProgress && event.pointerCount == 1) {
+                    if (zoom > 1.001f) {
+                        parent.requestDisallowInterceptTouchEvent(true)
+                        offsetX += dx
+                        offsetY += dy
+                        lastTouchX = event.x
+                        lastTouchY = event.y
+                        clampOffsets()
+                        invalidate()
+                    } else if (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop) {
+                        // At 1x, release interception so RecyclerView can scroll pages.
+                        parent.requestDisallowInterceptTouchEvent(false)
+                    }
                 }
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                if (!scaleDetector.isInProgress) parent.requestDisallowInterceptTouchEvent(false)
+                parent.requestDisallowInterceptTouchEvent(true)
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
