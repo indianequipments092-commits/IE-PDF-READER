@@ -47,7 +47,23 @@ class MainActivity : Activity() {
         addButton("Open") { openOtherApp() }
         addButton("Info") { showInfo() }
         setContentView(root)
-        pickPdf()
+
+        val externalUri = extractPdfUri(intent)
+        if (externalUri != null) openPdf(externalUri) else pickPdf()
+    }
+
+    private fun extractPdfUri(source: Intent?): Uri? {
+        if (source == null || source.action != Intent.ACTION_VIEW) return null
+        val uri = source.data ?: return null
+        return if (source.type == null || source.type == "application/pdf" || uri.toString().lowercase().endsWith(".pdf")) uri else null
+    }
+
+    private fun openPdf(uri: Uri) {
+        currentUri = uri
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) { }
+        viewer.open(uri)
     }
 
     private fun addButton(label: String, action: () -> Unit) {
@@ -108,11 +124,15 @@ class MainActivity : Activity() {
             .setMessage(viewer.infoText(currentUri)).setPositiveButton("OK", null).show()
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        intent ?: return
+        val uri = extractPdfUri(intent)
+        if (uri != null) openPdf(uri)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == pick && resultCode == RESULT_OK) data?.data?.let {
-            currentUri = it
-            viewer.open(it)
-        }
+        if (requestCode == pick && resultCode == RESULT_OK) data?.data?.let { openPdf(it) }
     }
 }
