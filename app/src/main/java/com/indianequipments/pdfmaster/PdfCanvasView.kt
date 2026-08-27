@@ -28,14 +28,18 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
     private val gap = 24f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val hideRunnable = Runnable { onActivityBar(false) }
+    private var cachedBitmap: Bitmap? = null
+    private var cachedPage = -1
+    private var cachedScale = 0f
 
     fun open(uri: Uri) {
-        renderer?.close(); pfd?.close(); tempFile?.delete()
+        renderer?.close(); pfd?.close(); tempFile?.delete(); cachedBitmap?.recycle(); cachedBitmap = null
         tempFile = File.createTempFile("pdfmaster_", ".pdf", ctx.cacheDir)
         ctx.contentResolver.openInputStream(uri)!!.use { input -> FileOutputStream(tempFile!!).use { output -> input.copyTo(output) } }
         pfd = ParcelFileDescriptor.open(tempFile!!, ParcelFileDescriptor.MODE_READ_ONLY)
         renderer = PdfRenderer(pfd!!)
         scale = 1f; fit = 1f; tx = 0f; ty = 0f
+        cachedPage = -1
         invalidate(); post { reveal() }
     }
 
@@ -47,33 +51,49 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
     private fun calculateFit(): Float {
         val r = renderer ?: return 1f
         if (r.pageCount == 0 || width == 0 || height == 0) return 1f
-        r.openPage(0).use { p -> return min(width.toFloat() / p.width, height.toFloat() / p.height) }
+        r.openPage(0).use { p ->
+            return if (r.pageCount == 1) min(width.toFloat() / p.width, height.toFloat() / p.height)
+            else width.toFloat() / p.width
+        }
     }
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c); c.drawColor(Color.rgb(235,235,235))
         val r = renderer ?: return
         if (fit <= 0f) fit = calculateFit()
+        if (r.pageCount == 1 && scale <= fit) {
+            r.openPage(0).use { page ->
+                val w = page.width * fit; val h = page.height * fit
+                val left = (width - w) / 2f
+                val top = (height - h) / 2f
+                renderCached(c, page, 0, left, top, w, h)
+            }
+            return
+        }
         var y = ty
         for (i in 0 until r.pageCount) {
             r.openPage(i).use { page ->
                 val w = page.width * scale; val h = page.height * scale
                 val left = (width - w) / 2f + tx
-                if (y + h >= 0 && y <= height) renderPage(c, page, left, y, w, h)
+                if (y + h >= 0 && y <= height) renderCached(c, page, i, left, y, w, h)
                 y += h + gap
             }
         }
     }
 
-    private fun renderPage(c: Canvas, page: PdfRenderer.Page, left: Float, top: Float, w: Float, h: Float) {
+    private fun renderCached(c: Canvas, page: PdfRenderer.Page, index: Int, left: Float, top: Float, w: Float, h: Float) {
         val maxSide = 2048f
         val bw = min(maxSide, max(1f, w)).roundToInt()
         val bh = min(maxSide, max(1f, h)).roundToInt()
-        val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-        bitmap.eraseColor(Color.WHITE)
-        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-        c.drawBitmap(bitmap, null, RectF(left, top, left + w, top + h), paint)
-        bitmap.recycle()
+        if (cachedBitmap == null || cachedPage != index || abs(cachedScale - scale) > 0.001f || cachedBitmap!!.width != bw || cachedBitmap!!.height != bh) {
+            cachedBitmap?.recycle()
+            cachedBitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            cachedBitmap!!.eraseColor(Color.WHITE)
+            page.render(cachedBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            cachedPage = index
+            cachedScale = scale
+        }
+        c.drawBitmap(cachedBitmap!!, null, RectF(left, top, left + w, top + h), paint)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -117,45 +137,40 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
 
     private fun clamp(){
         if(scale < fit) scale=fit
+        if(renderer?.pageCount == 1 && scale <= fit){ tx=0f; ty=0f; return }
         val total=totalHeight(); val minY=min(0f,height-total)
-        ty=ty.coerceIn(minY,0f); if(scale <= fit) tx=0f
+        ty=ty.coerceIn(minY,0f)
+        val r=renderer
+        if (r != null && r.pageCount > 0) {
+            r.openPage(0).use { p ->
+                val w=p.width*scale
+                val minX=min(0f,width-w); tx=tx.coerceIn(minX,0f)
+            }
+        }
     }
 
     fun search(term: String): Int {
         val file = tempFile ?: return -1
-        return try {
-            PDDocument.load(file).use { doc ->
-                val stripper = PDFTextStripper()
-                for (page in 1..doc.numberOfPages) {
-                    stripper.startPage = page; stripper.endPage = page
-                    if (stripper.getText(doc).contains(term, ignoreCase = true)) {
-                        goToPage(page - 1); return page - 1
-                    }
-                }
-            }
+        return try { PDDocument.load(file).use { doc ->
+            val stripper = PDFTextStripper()
+            for (page in 1..doc.numberOfPages) { stripper.startPage=page; stripper.endPage=page; if(stripper.getText(doc).contains(term,true)){ goToPage(page-1); return page-1 } }
             -1
-        } catch (_: Exception) { -1 }
+        }} catch (_: Exception) { -1 }
     }
 
     private fun goToPage(pageIndex: Int) {
-        val r = renderer ?: return
-        var y = 0f
-        for (i in 0 until pageIndex.coerceAtMost(r.pageCount - 1)) r.openPage(i).use { y += it.height * scale + gap }
-        ty = -y; clamp(); invalidate()
+        val r=renderer?:return
+        var y=0f
+        for(i in 0 until pageIndex.coerceAtMost(r.pageCount-1)) r.openPage(i).use { y += it.height*scale+gap }
+        ty=-y; clamp(); invalidate()
     }
 
     fun infoText(uri: Uri?): String {
-        val r = renderer
-        val name = uri?.lastPathSegment ?: "PDF"
-        val size = tempFile?.length() ?: 0L
-        return "File: $name\nPages: ${r?.pageCount ?: 0}\nSize: ${size / 1024} KB"
+        val r=renderer; val name=uri?.lastPathSegment ?: "PDF"; val size=tempFile?.length() ?: 0L
+        return "File: $name\nPages: ${r?.pageCount ?: 0}\nSize: ${size/1024} KB"
     }
 
-    private fun reveal(){
-        onActivityBar(true); removeCallbacks(hideRunnable); postDelayed(hideRunnable,2000)
-    }
+    private fun reveal(){ onActivityBar(true); removeCallbacks(hideRunnable); postDelayed(hideRunnable,2000) }
 
-    override fun onDetachedFromWindow(){
-        removeCallbacks(hideRunnable); renderer?.close(); pfd?.close(); tempFile?.delete(); super.onDetachedFromWindow()
-    }
+    override fun onDetachedFromWindow(){ removeCallbacks(hideRunnable); cachedBitmap?.recycle(); renderer?.close(); pfd?.close(); tempFile?.delete(); super.onDetachedFromWindow() }
 }
