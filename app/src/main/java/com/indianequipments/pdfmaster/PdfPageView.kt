@@ -12,7 +12,12 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.max
 
-class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
+class PdfPageView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs) {
+    var onTap: (() -> Unit)? = null
+
     private var bitmap: Bitmap? = null
     private var baseScale = 1f
     private var zoom = 1f
@@ -21,68 +26,80 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private var lastTouchX = 0f
     private var lastTouchY = 0f
 
-    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+    private val paint = android.graphics.Paint(
+        android.graphics.Paint.ANTI_ALIAS_FLAG or
+            android.graphics.Paint.FILTER_BITMAP_FLAG
+    ).apply {
         isDither = true
     }
 
-    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-            parent.requestDisallowInterceptTouchEvent(true)
-            return true
-        }
+    private val scaleDetector = ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                parent.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
 
-        override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val oldScale = baseScale * zoom
-            val newZoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
-            val newScale = baseScale * newZoom
-
-            // Keep the exact PDF point under the two-finger midpoint fixed.
-            // The zoom therefore follows the user's fingers instead of jumping
-            // toward a corner of the page.
-            val centerX = width / 2f
-            val centerY = height / 2f
-            val contentX = (detector.focusX - centerX - offsetX) / oldScale
-            val contentY = (detector.focusY - centerY - offsetY) / oldScale
-
-            zoom = newZoom
-            offsetX = detector.focusX - centerX - contentX * newScale
-            offsetY = detector.focusY - centerY - contentY * newScale
-            clampOffsets()
-            invalidate()
-            return true
-        }
-
-        override fun onScaleEnd(detector: ScaleGestureDetector) {
-            parent.requestDisallowInterceptTouchEvent(false)
-        }
-    })
-
-    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: MotionEvent): Boolean = true
-
-        override fun onDoubleTap(e: MotionEvent): Boolean {
-            val oldScale = baseScale * zoom
-            val newZoom = if (zoom <= 1.05f) 2f else 1f
-
-            if (newZoom == 1f) {
-                zoom = 1f
-                offsetX = 0f
-                offsetY = 0f
-            } else {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val oldScale = baseScale * zoom
+                val newZoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
                 val newScale = baseScale * newZoom
+
+                // Keep the PDF point under the two-finger midpoint fixed.
+                // This prevents zoom from jumping toward a page corner.
                 val centerX = width / 2f
                 val centerY = height / 2f
-                val contentX = (e.x - centerX - offsetX) / oldScale
-                val contentY = (e.y - centerY - offsetY) / oldScale
+                val contentX = (detector.focusX - centerX - offsetX) / oldScale
+                val contentY = (detector.focusY - centerY - offsetY) / oldScale
+
                 zoom = newZoom
-                offsetX = e.x - centerX - contentX * newScale
-                offsetY = e.y - centerY - contentY * newScale
+                offsetX = detector.focusX - centerX - contentX * newScale
+                offsetY = detector.focusY - centerY - contentY * newScale
                 clampOffsets()
+                invalidate()
+                return true
             }
-            invalidate()
-            return true
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                parent.requestDisallowInterceptTouchEvent(false)
+            }
         }
-    })
+    )
+
+    private val gestureDetector = GestureDetector(
+        context,
+        object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                onTap?.invoke()
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val oldScale = baseScale * zoom
+                val newZoom = if (zoom <= 1.05f) 2f else 1f
+                if (newZoom == 1f) {
+                    zoom = 1f
+                    offsetX = 0f
+                    offsetY = 0f
+                } else {
+                    val newScale = baseScale * newZoom
+                    val centerX = width / 2f
+                    val centerY = height / 2f
+                    val contentX = (e.x - centerX - offsetX) / oldScale
+                    val contentY = (e.y - centerY - offsetY) / oldScale
+                    zoom = newZoom
+                    offsetX = e.x - centerX - contentX * newScale
+                    offsetY = e.y - centerY - contentY * newScale
+                    clampOffsets()
+                }
+                invalidate()
+                return true
+            }
+        }
+    )
 
     init {
         setBackgroundColor(Color.WHITE)
@@ -109,9 +126,6 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private fun resetToFit() {
         val image = bitmap ?: return
         val availableWidth = width.toFloat().coerceAtLeast(1f)
-        // The source bitmap is intentionally rendered at a higher resolution;
-        // fitting it back to the screen keeps normal view sharp and leaves real
-        // pixel detail available for pinch zoom.
         baseScale = (availableWidth / image.width).coerceAtLeast(0.01f)
         zoom = 1f
         offsetX = 0f
@@ -143,6 +157,7 @@ class PdfPageView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             MotionEvent.ACTION_DOWN -> {
                 lastTouchX = event.x
                 lastTouchY = event.y
+                parent.requestDisallowInterceptTouchEvent(false)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
