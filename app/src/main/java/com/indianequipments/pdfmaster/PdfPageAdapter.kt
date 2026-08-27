@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.min
+import kotlin.math.sqrt
 
 class PdfPageAdapter(
     private val renderer: PdfRenderer,
@@ -52,15 +53,20 @@ class PdfPageAdapter(
                     try {
                         val sourceWidth = page.width.coerceAtLeast(1)
                         val sourceHeight = page.height.coerceAtLeast(1)
-                        val desiredScale = pageWidthPx.toFloat() * 4f / sourceWidth
-                        val maxPixels = 10_000_000L
-                        val pixelLimitedScale = kotlin.math.sqrt(
+
+                        // Render substantially above display resolution so text/vector PDFs
+                        // remain sharp when the user zooms. The pixel cap prevents OOM on
+                        // unusually large pages.
+                        val desiredScale = pageWidthPx.toFloat() * 5f / sourceWidth
+                        val maxPixels = 12_000_000L
+                        val pixelLimitedScale = sqrt(
                             maxPixels.toDouble() /
                                 (sourceWidth.toDouble() * sourceHeight.toDouble())
                         ).toFloat()
-                        val scale = min(desiredScale, pixelLimitedScale).coerceIn(1f, 4f)
+                        val scale = min(desiredScale, pixelLimitedScale).coerceIn(1f, 5f)
                         val renderWidth = (sourceWidth * scale).toInt().coerceAtLeast(1)
                         targetHeight = (sourceHeight * scale).toInt().coerceAtLeast(1)
+
                         result = Bitmap.createBitmap(
                             renderWidth,
                             targetHeight,
