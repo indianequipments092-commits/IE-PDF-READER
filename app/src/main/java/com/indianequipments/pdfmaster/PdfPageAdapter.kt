@@ -13,7 +13,8 @@ import kotlin.math.min
 
 class PdfPageAdapter(
     private val renderer: PdfRenderer,
-    private val pageWidthPx: Int
+    private val pageWidthPx: Int,
+    private val onPageTap: (() -> Unit)? = null
 ) : RecyclerView.Adapter<PdfPageAdapter.PageHolder>() {
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -29,6 +30,7 @@ class PdfPageAdapter(
             )
             setPadding(0, 10, 0, 10)
             setBackgroundColor(Color.rgb(224, 224, 224))
+            onTap = onPageTap
         }
         return PageHolder(pageView)
     }
@@ -38,6 +40,7 @@ class PdfPageAdapter(
     override fun onBindViewHolder(holder: PageHolder, position: Int) {
         val view = holder.pageView
         view.clearPage()
+        view.onTap = onPageTap
         view.tag = position
 
         executor.execute {
@@ -49,24 +52,27 @@ class PdfPageAdapter(
                     try {
                         val sourceWidth = page.width.coerceAtLeast(1)
                         val sourceHeight = page.height.coerceAtLeast(1)
-
-                        // Render substantially above screen resolution. PdfRenderer
-                        // produces a bitmap, so rendering only at display width makes
-                        // text-based PDFs look soft as soon as the user pinches in.
-                        // 4x gives enough source detail for a useful zoom while the
-                        // pixel cap prevents pathological PDFs from exhausting RAM.
-                        val desiredScale = (pageWidthPx.toFloat() * 4f / sourceWidth)
+                        val desiredScale = pageWidthPx.toFloat() * 4f / sourceWidth
                         val maxPixels = 10_000_000L
                         val pixelLimitedScale = kotlin.math.sqrt(
-                            maxPixels.toDouble() / (sourceWidth.toDouble() * sourceHeight.toDouble())
+                            maxPixels.toDouble() /
+                                (sourceWidth.toDouble() * sourceHeight.toDouble())
                         ).toFloat()
                         val scale = min(desiredScale, pixelLimitedScale).coerceIn(1f, 4f)
-
                         val renderWidth = (sourceWidth * scale).toInt().coerceAtLeast(1)
                         targetHeight = (sourceHeight * scale).toInt().coerceAtLeast(1)
-                        result = Bitmap.createBitmap(renderWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                        result = Bitmap.createBitmap(
+                            renderWidth,
+                            targetHeight,
+                            Bitmap.Config.ARGB_8888
+                        )
                         result?.eraseColor(Color.WHITE)
-                        page.render(result, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.render(
+                            result,
+                            null,
+                            null,
+                            PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                        )
                     } finally {
                         page.close()
                     }
