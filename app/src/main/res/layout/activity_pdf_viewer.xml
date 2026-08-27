@@ -9,10 +9,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:overScrollMode="ifContentScrolls"
-        android:paddingBottom="12dp" />
+        android:overScrollMode="ifContentScrolls" />
 
-    <!-- Reader controls live at the bottom so they never cover the top of a PDF. -->
+    <!-- Bottom controls are independent from the Android status bar. -->
     <LinearLayout
         android:id="@+id/viewerToolbar"
         android:layout_width="match_parent"
@@ -83,7 +82,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center" />
 
-    <!-- Only multi-page PDFs show the page counter. It sits above the bottom toolbar. -->
+    <!-- Page counter is only shown for multi-page documents. -->
     <TextView
         android:id="@+id/pageIndicator"
         android:layout_width="wrap_content"
