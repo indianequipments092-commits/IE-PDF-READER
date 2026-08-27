@@ -38,17 +38,24 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
         ctx.contentResolver.openInputStream(uri)!!.use { input -> FileOutputStream(tempFile!!).use { output -> input.copyTo(output) } }
         pfd = ParcelFileDescriptor.open(tempFile!!, ParcelFileDescriptor.MODE_READ_ONLY)
         renderer = PdfRenderer(pfd!!)
-        scale = 1f; fit = 1f; tx = 0f; ty = 0f; cachedPage = -1
+        // The view is normally measured before the PDF is opened. Therefore
+        // onSizeChanged cannot calculate the fit while renderer is still null.
+        // Calculate it here so the first frame uses the full viewer width.
+        fit = calculateFit()
+        scale = fit
+        tx = 0f
+        ty = 0f
+        cachedPage = -1
+        cachedScale = 0f
         invalidate(); post { reveal() }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (renderer != null) { fit = calculateFit(); scale = fit; tx = 0f; ty = initialSinglePageY(); clamp() }
+        if (renderer != null) { fit = calculateFit(); scale = fit; tx = 0f; ty = initialSinglePageY(); clamp(); invalidate() }
     }
 
-    // The PDF is always fitted to the available screen width. This removes
-    // unwanted left/right margins and keeps the page edges flush with the view.
+    // Always fit PDF pages to the full available viewer width.
     private fun calculateFit(): Float {
         val r = renderer ?: return 1f
         if (r.pageCount == 0 || width == 0) return 1f
