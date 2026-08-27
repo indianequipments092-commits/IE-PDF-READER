@@ -44,15 +44,23 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (renderer != null) { fit = calculateFit(); if (scale < fit) scale = fit; clamp() }
+        if (renderer != null) { fit = calculateFit(); scale = fit; tx = 0f; ty = initialSinglePageY(); clamp() }
     }
 
+    // The PDF is always fitted to the available screen width. This removes
+    // unwanted left/right margins and keeps the page edges flush with the view.
     private fun calculateFit(): Float {
         val r = renderer ?: return 1f
-        if (r.pageCount == 0 || width == 0 || height == 0) return 1f
+        if (r.pageCount == 0 || width == 0) return 1f
+        r.openPage(0).use { p -> return width.toFloat() / p.width.toFloat() }
+    }
+
+    private fun initialSinglePageY(): Float {
+        val r = renderer ?: return 0f
+        if (r.pageCount != 1 || width == 0) return 0f
         r.openPage(0).use { p ->
-            return if (r.pageCount == 1) min(width.toFloat() / p.width, height.toFloat() / p.height)
-            else width.toFloat() / p.width
+            val h = p.height * fit
+            return if (h < height) (height - h) / 2f else 0f
         }
     }
 
@@ -62,8 +70,9 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
         if (fit <= 0f) fit = calculateFit()
         if (r.pageCount == 1 && scale <= fit) {
             r.openPage(0).use { page ->
-                val w = page.width * fit; val h = page.height * fit
-                renderCached(c, page, 0, (width-w)/2f, (height-h)/2f, w, h)
+                val w = width.toFloat()
+                val h = page.height * fit
+                renderCached(c, page, 0, 0f, initialSinglePageY(), w, h)
             }
             return
         }
@@ -130,7 +139,7 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
 
     private fun clamp(){
         if(scale < fit) scale=fit
-        if(renderer?.pageCount == 1 && scale <= fit){ tx=0f; ty=0f; return }
+        if(renderer?.pageCount == 1 && scale <= fit){ tx=0f; ty=initialSinglePageY(); return }
         val total=totalHeight(); ty=ty.coerceIn(min(0f,height-total),0f)
         renderer?.let { r -> if(r.pageCount>0) r.openPage(0).use { p -> tx=tx.coerceIn(min(0f,width-p.width*scale),0f) } }
     }
