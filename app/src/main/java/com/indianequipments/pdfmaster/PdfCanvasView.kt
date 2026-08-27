@@ -38,8 +38,7 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
         ctx.contentResolver.openInputStream(uri)!!.use { input -> FileOutputStream(tempFile!!).use { output -> input.copyTo(output) } }
         pfd = ParcelFileDescriptor.open(tempFile!!, ParcelFileDescriptor.MODE_READ_ONLY)
         renderer = PdfRenderer(pfd!!)
-        scale = 1f; fit = 1f; tx = 0f; ty = 0f
-        cachedPage = -1
+        scale = 1f; fit = 1f; tx = 0f; ty = 0f; cachedPage = -1
         invalidate(); post { reveal() }
     }
 
@@ -64,9 +63,7 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
         if (r.pageCount == 1 && scale <= fit) {
             r.openPage(0).use { page ->
                 val w = page.width * fit; val h = page.height * fit
-                val left = (width - w) / 2f
-                val top = (height - h) / 2f
-                renderCached(c, page, 0, left, top, w, h)
+                renderCached(c, page, 0, (width-w)/2f, (height-h)/2f, w, h)
             }
             return
         }
@@ -88,22 +85,20 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
         if (cachedBitmap == null || cachedPage != index || abs(cachedScale - scale) > 0.001f || cachedBitmap!!.width != bw || cachedBitmap!!.height != bh) {
             cachedBitmap?.recycle()
             cachedBitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-            cachedBitmap!!.eraseColor(Color.WHITE)
-            page.render(cachedBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            val bitmap = cachedBitmap
+            bitmap?.eraseColor(Color.WHITE)
+            bitmap?.let { page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) }
             cachedPage = index
             cachedScale = scale
         }
-        c.drawBitmap(cachedBitmap!!, null, RectF(left, top, left + w, top + h), paint)
+        val bitmap = cachedBitmap
+        bitmap?.let { c.drawBitmap(it, null, RectF(left, top, left + w, top + h), paint) }
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { lastX=e.x; lastY=e.y; reveal(); return true }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                oldDist=distance(e)
-                if(oldDist>0f){ pinchMidX=(e.getX(0)+e.getX(1))/2f; pinchMidY=(e.getY(0)+e.getY(1))/2f }
-                reveal(); return true
-            }
+            MotionEvent.ACTION_POINTER_DOWN -> { oldDist=distance(e); if(oldDist>0f){pinchMidX=(e.getX(0)+e.getX(1))/2f; pinchMidY=(e.getY(0)+e.getY(1))/2f}; reveal(); return true }
             MotionEvent.ACTION_MOVE -> {
                 reveal()
                 if (e.pointerCount >= 2) {
@@ -114,9 +109,7 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
                         tx=pinchMidX+(tx-pinchMidX)*k; ty=pinchMidY+(ty-pinchMidY)*k
                         scale=newScale; oldDist=d; clamp(); invalidate()
                     }
-                } else {
-                    tx += e.x-lastX; ty += e.y-lastY; lastX=e.x; lastY=e.y; clamp(); invalidate()
-                }
+                } else { tx+=e.x-lastX; ty+=e.y-lastY; lastX=e.x; lastY=e.y; clamp(); invalidate() }
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> { oldDist=0f; return true }
@@ -138,39 +131,17 @@ class PdfCanvasView(private val ctx: Context, private val onActivityBar: (Boolea
     private fun clamp(){
         if(scale < fit) scale=fit
         if(renderer?.pageCount == 1 && scale <= fit){ tx=0f; ty=0f; return }
-        val total=totalHeight(); val minY=min(0f,height-total)
-        ty=ty.coerceIn(minY,0f)
-        val r=renderer
-        if (r != null && r.pageCount > 0) {
-            r.openPage(0).use { p ->
-                val w=p.width*scale
-                val minX=min(0f,width-w); tx=tx.coerceIn(minX,0f)
-            }
-        }
+        val total=totalHeight(); ty=ty.coerceIn(min(0f,height-total),0f)
+        renderer?.let { r -> if(r.pageCount>0) r.openPage(0).use { p -> tx=tx.coerceIn(min(0f,width-p.width*scale),0f) } }
     }
 
     fun search(term: String): Int {
-        val file = tempFile ?: return -1
-        return try { PDDocument.load(file).use { doc ->
-            val stripper = PDFTextStripper()
-            for (page in 1..doc.numberOfPages) { stripper.startPage=page; stripper.endPage=page; if(stripper.getText(doc).contains(term,true)){ goToPage(page-1); return page-1 } }
-            -1
-        }} catch (_: Exception) { -1 }
+        val file=tempFile?:return -1
+        return try { PDDocument.load(file).use { doc -> val stripper=PDFTextStripper(); for(page in 1..doc.numberOfPages){ stripper.startPage=page; stripper.endPage=page; if(stripper.getText(doc).contains(term,true)){goToPage(page-1); return page-1} }; -1 } } catch(_:Exception){-1}
     }
 
-    private fun goToPage(pageIndex: Int) {
-        val r=renderer?:return
-        var y=0f
-        for(i in 0 until pageIndex.coerceAtMost(r.pageCount-1)) r.openPage(i).use { y += it.height*scale+gap }
-        ty=-y; clamp(); invalidate()
-    }
-
-    fun infoText(uri: Uri?): String {
-        val r=renderer; val name=uri?.lastPathSegment ?: "PDF"; val size=tempFile?.length() ?: 0L
-        return "File: $name\nPages: ${r?.pageCount ?: 0}\nSize: ${size/1024} KB"
-    }
-
-    private fun reveal(){ onActivityBar(true); removeCallbacks(hideRunnable); postDelayed(hideRunnable,2000) }
-
-    override fun onDetachedFromWindow(){ removeCallbacks(hideRunnable); cachedBitmap?.recycle(); renderer?.close(); pfd?.close(); tempFile?.delete(); super.onDetachedFromWindow() }
+    private fun goToPage(pageIndex:Int){ val r=renderer?:return; var y=0f; for(i in 0 until pageIndex.coerceAtMost(r.pageCount-1)) r.openPage(i).use{y+=it.height*scale+gap}; ty=-y; clamp(); invalidate() }
+    fun infoText(uri:Uri?):String { val r=renderer; val name=uri?.lastPathSegment?:"PDF"; val size=tempFile?.length()?:0L; return "File: $name\nPages: ${r?.pageCount?:0}\nSize: ${size/1024} KB" }
+    private fun reveal(){onActivityBar(true);removeCallbacks(hideRunnable);postDelayed(hideRunnable,2000)}
+    override fun onDetachedFromWindow(){removeCallbacks(hideRunnable);cachedBitmap?.recycle();renderer?.close();pfd?.close();tempFile?.delete();super.onDetachedFromWindow()}
 }
