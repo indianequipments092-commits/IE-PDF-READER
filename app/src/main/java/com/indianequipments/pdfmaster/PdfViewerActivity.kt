@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
-import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageButton
 import android.widget.ProgressBar
@@ -50,7 +49,7 @@ class PdfViewerActivity : AppCompatActivity() {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.setHasFixedSize(false)
         recyclerView.itemAnimator = null
-        recyclerView.setItemViewCacheSize(1)
+        recyclerView.setItemViewCacheSize(2)
         sourceUri = intent?.data
         pdfName = resolveDisplayName(sourceUri) ?: "PDF"
         findViewById<TextView>(R.id.pdfName).text = pdfName
@@ -58,10 +57,6 @@ class PdfViewerActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.shareButton).setOnClickListener { sharePdf() }
         findViewById<ImageButton>(R.id.infoButton).setOnClickListener { showInfo() }
         findViewById<ImageButton>(R.id.openWithButton).setOnClickListener { openWithAnotherApp() }
-        recyclerView.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) toggleControls()
-            false
-        }
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                 updateCurrentPage()
@@ -73,7 +68,10 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     private fun openPdf(uri: Uri?) {
-        if (uri == null) { showError("No PDF was provided"); return }
+        if (uri == null) {
+            showError("No PDF was provided")
+            return
+        }
         loading.visibility = View.VISIBLE
         Thread {
             try {
@@ -85,7 +83,11 @@ class PdfViewerActivity : AppCompatActivity() {
                     descriptor = fd
                     renderer = pdfRenderer
                     loading.visibility = View.GONE
-                    adapter = PdfPageAdapter(pdfRenderer, recyclerView.width.coerceAtLeast(1))
+                    adapter = PdfPageAdapter(
+                        pdfRenderer,
+                        recyclerView.width.coerceAtLeast(1),
+                        onPageTap = { toggleControls() }
+                    )
                     recyclerView.adapter = adapter
                     val multiplePages = pdfRenderer.pageCount > 1
                     pageIndicator.visibility = if (multiplePages) View.VISIBLE else View.GONE
@@ -93,7 +95,10 @@ class PdfViewerActivity : AppCompatActivity() {
                     showControlsAndScheduleHide()
                 }
             } catch (_: Exception) {
-                runOnUiThread { loading.visibility = View.GONE; showError("This PDF could not be opened") }
+                runOnUiThread {
+                    loading.visibility = View.GONE
+                    showError("This PDF could not be opened")
+                }
             }
         }.start()
     }
@@ -106,7 +111,9 @@ class PdfViewerActivity : AppCompatActivity() {
         if (first != RecyclerView.NO_POSITION) pageIndicator.text = "${first + 1} / $total"
     }
 
-    private fun toggleControls() { if (controlsVisible) hideControls() else showControlsAndScheduleHide() }
+    private fun toggleControls() {
+        if (controlsVisible) hideControls() else showControlsAndScheduleHide()
+    }
 
     private fun showControlsAndScheduleHide() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
@@ -131,7 +138,10 @@ class PdfViewerActivity : AppCompatActivity() {
     }
 
     private fun sharePdf() {
-        val file = cachedFile ?: run { Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show(); return }
+        val file = cachedFile ?: run {
+            Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
+            return
+        }
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
@@ -142,21 +152,28 @@ class PdfViewerActivity : AppCompatActivity() {
 
     private fun openWithAnotherApp() {
         val uri = sourceUri ?: cachedFile?.let { FileProvider.getUriForFile(this, "$packageName.fileprovider", it) }
-        if (uri == null) { Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show(); return }
+        if (uri == null) {
+            Toast.makeText(this, "PDF is still loading", Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
             startActivity(Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/pdf")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             })
-        } catch (_: Exception) { Toast.makeText(this, "No compatible PDF app found", Toast.LENGTH_SHORT).show() }
+        } catch (_: Exception) {
+            Toast.makeText(this, "No compatible PDF app found", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showInfo() {
         val pages = renderer?.pageCount ?: 0
         val size = cachedFile?.length()?.let { formatSize(it) } ?: "Unknown"
-        AlertDialog.Builder(this).setTitle("PDF information")
+        AlertDialog.Builder(this)
+            .setTitle("PDF information")
             .setMessage("Name: $pdfName\nSize: $size\nPages: $pages\nLocation: ${sourceUri ?: "Unknown"}")
-            .setPositiveButton("OK", null).show()
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun formatSize(bytes: Long): String = when {
@@ -180,10 +197,15 @@ class PdfViewerActivity : AppCompatActivity() {
         return try {
             cursor = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             if (cursor?.moveToFirst() == true) cursor.getString(0) else uri.lastPathSegment
-        } finally { cursor?.close() }
+        } finally {
+            cursor?.close()
+        }
     }
 
-    private fun showError(message: String) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); finish() }
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        finish()
+    }
 
     override fun onDestroy() {
         controlsHideRunnable?.let(uiHandler::removeCallbacks)
